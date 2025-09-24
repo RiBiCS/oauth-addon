@@ -7,18 +7,24 @@
  */
 package org.seedstack.oauth.internal;
 
-import com.google.common.base.Strings;
-import com.nimbusds.oauth2.sdk.AuthorizationRequest;
-import com.nimbusds.oauth2.sdk.ParseException;
-import com.nimbusds.oauth2.sdk.ResponseType;
-import com.nimbusds.oauth2.sdk.Scope;
-import com.nimbusds.oauth2.sdk.id.ClientID;
-import com.nimbusds.oauth2.sdk.id.State;
-import com.nimbusds.oauth2.sdk.token.AccessToken;
-import com.nimbusds.oauth2.sdk.token.BearerAccessToken;
-import com.nimbusds.oauth2.sdk.token.TypelessAccessToken;
-import com.nimbusds.openid.connect.sdk.AuthenticationRequest;
-import com.nimbusds.openid.connect.sdk.Nonce;
+import static com.google.common.base.Preconditions.checkNotNull;
+import static org.apache.shiro.web.util.WebUtils.issueRedirect;
+import static org.seedstack.oauth.internal.OAuthUtils.OPENID_SCOPE;
+import static org.seedstack.oauth.internal.OAuthUtils.createScope;
+
+import java.io.IOException;
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+
+import javax.inject.Inject;
+import javax.servlet.ServletRequest;
+import javax.servlet.ServletResponse;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+
 import org.apache.shiro.SecurityUtils;
 import org.apache.shiro.authc.AuthenticationException;
 import org.apache.shiro.authc.AuthenticationToken;
@@ -35,21 +41,18 @@ import org.seedstack.seed.web.security.SessionRegeneratingFilter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.inject.Inject;
-import javax.servlet.ServletRequest;
-import javax.servlet.ServletResponse;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
-import java.io.IOException;
-import java.net.URI;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-
-import static com.google.common.base.Preconditions.checkNotNull;
-import static org.apache.shiro.web.util.WebUtils.issueRedirect;
-import static org.seedstack.oauth.internal.OAuthUtils.OPENID_SCOPE;
-import static org.seedstack.oauth.internal.OAuthUtils.createScope;
+import com.google.common.base.Strings;
+import com.nimbusds.oauth2.sdk.AuthorizationRequest;
+import com.nimbusds.oauth2.sdk.ParseException;
+import com.nimbusds.oauth2.sdk.ResponseType;
+import com.nimbusds.oauth2.sdk.Scope;
+import com.nimbusds.oauth2.sdk.id.ClientID;
+import com.nimbusds.oauth2.sdk.id.State;
+import com.nimbusds.oauth2.sdk.token.AccessToken;
+import com.nimbusds.oauth2.sdk.token.BearerAccessToken;
+import com.nimbusds.oauth2.sdk.token.TypelessAccessToken;
+import com.nimbusds.openid.connect.sdk.AuthenticationRequest;
+import com.nimbusds.openid.connect.sdk.Nonce;
 
 @SecurityFilter("oauth")
 public class OAuthAuthenticationFilter extends AuthenticatingFilter implements SessionRegeneratingFilter {
@@ -101,31 +104,31 @@ public class OAuthAuthenticationFilter extends AuthenticatingFilter implements S
             loggedIn = executeLogin(request, response);
         }
         if (!loggedIn) {
-            if (oauthConfig.getRedirect() != null) {
-                redirectToAuthorizationEndpoint(request, response);
-            } else {
-                try {
-                    ((HttpServletResponse) response).sendError(
-                            HttpServletResponse.SC_UNAUTHORIZED,
-                            OAuthUtils.formatUnauthorizedMessage(request, oauthConfig.isDiscloseUnauthorizedReason())
-                    );
-                } catch (IOException e1) {
-                    LOGGER.debug("Unable to send {} HTTP code to client", HttpServletResponse.SC_UNAUTHORIZED, e1);
-                }
+            // if (oauthConfig.getRedirect() != null) {
+            if (redirectToAuthorizationEndpoint(request, response))
+                return loggedIn;
+            try {
+                ((HttpServletResponse) response).sendError(
+                        HttpServletResponse.SC_UNAUTHORIZED,
+                        OAuthUtils.formatUnauthorizedMessage(request, oauthConfig.isDiscloseUnauthorizedReason()));
+            } catch (IOException e1) {
+                LOGGER.debug("Unable to send {} HTTP code to client", HttpServletResponse.SC_UNAUTHORIZED, e1);
             }
         }
         return loggedIn;
+
     }
 
     @Override
     protected boolean onLoginSuccess(AuthenticationToken token, Subject subject, ServletRequest request,
-                                     ServletResponse response) {
+            ServletResponse response) {
         regenerateSession(subject);
         return true;
     }
 
+    @Override
     protected boolean onLoginFailure(AuthenticationToken token, AuthenticationException e,
-                                     ServletRequest request, ServletResponse response) {
+            ServletRequest request, ServletResponse response) {
         if (LOGGER.isDebugEnabled()) {
             LOGGER.debug("Authentication exception", e);
         }
@@ -133,24 +136,41 @@ public class OAuthAuthenticationFilter extends AuthenticatingFilter implements S
         return false;
     }
 
-    private void redirectToAuthorizationEndpoint(ServletRequest request, ServletResponse response) throws IOException {
+    private boolean redirectToAuthorizationEndpoint(ServletRequest request, ServletResponse response) throws IOException {
         State state = new State();
         Nonce nonce = new Nonce();
         Scope scope = createScope(oauthConfig.getScopes());
 
+        URI callback = createRedirectCallback(request);
+
         URI uri;
         if (scope.contains(OPENID_SCOPE)) {
-            uri = buildAuthenticationURI(state, nonce, scope);
+            uri = buildAuthenticationURI(state, nonce, scope, callback);
         } else {
-            uri = buildAuthorizationURI(state, scope);
+            uri = buildAuthorizationURI(state, scope, callback);
         }
 
         saveState(state, nonce);
         saveRequest(request);
         issueRedirect(request, response, uri.toString());
+        return true;
     }
 
-    private URI buildAuthorizationURI(State state, Scope scope) {
+    private URI createRedirectCallback(ServletRequest request) {
+        String scheme = request.getScheme();
+        String host = request.getServerName();
+        int port = request.getServerPort();
+        try {
+            URI callback = new URI(scheme + "://" + host + ":" + port + "/callback");
+            oauthConfig.setRedirect(callback);
+            return callback;
+        } catch (URISyntaxException e) {
+            e.printStackTrace();
+        }
+        return null;
+    }
+
+    private URI buildAuthorizationURI(State state, Scope scope, URI callback) {
         OAuthProvider oauthProvider = oAuthService.getOAuthProvider();
         URI endpointURI = oauthProvider.getAuthorizationEndpoint();
         Map<String, List<String>> parameters = OAuthUtils.extractQueryParameters(endpointURI);
@@ -159,10 +179,11 @@ public class OAuthAuthenticationFilter extends AuthenticatingFilter implements S
         AuthorizationRequest.Builder builder = new AuthorizationRequest.Builder(
                 new ResponseType(ResponseType.Value.CODE),
                 new ClientID(checkNotNull(oauthConfig.getClientId(), "Missing client identifier")))
-                .scope(scope)
-                .redirectionURI(checkNotNull(oauthConfig.getRedirect(), "Missing redirect URI"))
-                .endpointURI(endpointURI)
-                .state(state);
+                        .scope(scope)
+                        .redirectionURI(
+                                checkNotNull(oauthConfig.getRedirect() != null ? oauthConfig.getRedirect() : callback, "Missing redirect URI"))
+                        .endpointURI(endpointURI)
+                        .state(state);
 
         for (Map.Entry<String, List<String>> parameter : parameters.entrySet()) {
             builder.customParameter(parameter.getKey(), parameter.getValue().toArray(new String[0]));
@@ -171,7 +192,7 @@ public class OAuthAuthenticationFilter extends AuthenticatingFilter implements S
         return builder.build().toURI();
     }
 
-    private URI buildAuthenticationURI(State state, Nonce nonce, Scope scope) {
+    private URI buildAuthenticationURI(State state, Nonce nonce, Scope scope, URI callback) {
         OAuthProvider oauthProvider = oAuthService.getOAuthProvider();
         URI endpointURI = oauthProvider.getAuthorizationEndpoint();
         Map<String, List<String>> parameters = OAuthUtils.extractQueryParameters(endpointURI);
@@ -181,10 +202,10 @@ public class OAuthAuthenticationFilter extends AuthenticatingFilter implements S
                 new ResponseType(ResponseType.Value.CODE),
                 scope,
                 new ClientID(checkNotNull(oauthConfig.getClientId(), "Missing client identifier")),
-                checkNotNull(oauthConfig.getRedirect(), "Missing redirect URI"))
-                .endpointURI(endpointURI)
-                .state(state)
-                .nonce(nonce);
+                checkNotNull(oauthConfig.getRedirect() != null ? oauthConfig.getRedirect() : callback, "Missing redirect URI"))
+                        .endpointURI(endpointURI)
+                        .state(state)
+                        .nonce(nonce);
 
         for (Map.Entry<String, List<String>> parameter : parameters.entrySet()) {
             builder.customParameter(parameter.getKey(), parameter.getValue().toArray(new String[0]));
