@@ -106,13 +106,13 @@ public class OAuthCallbackFilter extends AuthenticatingFilter implements Session
         String host = request.getServerName();
         int port = request.getServerPort();
         try {
-            URI callback = new URI(scheme + "://" + host + ":" + port + "/callback");
+            String portPart = (port == 80 || port == 443) ? "" : ":" + port;
+            URI callback = new URI(scheme + "://" + host + portPart + "/callback");
             oauthConfig.setRedirect(callback);
             return callback;
         } catch (URISyntaxException e) {
-            e.printStackTrace();
+            throw new IllegalStateException("Invalid redirect URI", e);
         }
-        return null;
     }
 
     @Override
