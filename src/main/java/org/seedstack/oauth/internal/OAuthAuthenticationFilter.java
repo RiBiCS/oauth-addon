@@ -14,7 +14,6 @@ import static org.seedstack.oauth.internal.OAuthUtils.createScope;
 
 import java.io.IOException;
 import java.net.URI;
-import java.net.URISyntaxException;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -141,7 +140,7 @@ public class OAuthAuthenticationFilter extends AuthenticatingFilter implements S
         Nonce nonce = new Nonce();
         Scope scope = createScope(oauthConfig.getScopes());
 
-        URI callback = createRedirectCallback(request);
+        URI callback = OAuthUtils.createRedirectCallback(request);
 
         URI uri;
         if (scope.contains(OPENID_SCOPE)) {
@@ -154,20 +153,6 @@ public class OAuthAuthenticationFilter extends AuthenticatingFilter implements S
         saveRequest(request);
         issueRedirect(request, response, uri.toString());
         return true;
-    }
-
-    private URI createRedirectCallback(ServletRequest request) {
-        String scheme = request.getScheme();
-        String host = request.getServerName();
-        int port = request.getServerPort();
-        try {
-            String portPart = (port == 80 || port == 443) ? "" : ":" + port;
-            URI callback = new URI(scheme + "://" + host + portPart + "/callback");
-            oauthConfig.setRedirect(callback);
-            return callback;
-        } catch (URISyntaxException e) {
-            throw new IllegalStateException("Invalid redirect URI", e);
-        }
     }
 
     private URI buildAuthorizationURI(State state, Scope scope, URI callback) {

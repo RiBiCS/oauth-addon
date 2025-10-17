@@ -69,7 +69,7 @@ public class OAuthCallbackFilter extends AuthenticatingFilter implements Session
                     oauthConfig,
                     new AuthorizationCodeGrant(
                             authorizationCode,
-                            checkNotNull(oauthConfig.getRedirect() != null ? oauthConfig.getRedirect() : createRedirectCallback(request),
+                            checkNotNull(oauthConfig.getRedirect() != null ? oauthConfig.getRedirect() : OAuthUtils.createRedirectCallback(request),
                                     "Missing redirect URI")),
                     getNonce(),
                     createScope(oauthConfig.getScopes()));
@@ -99,20 +99,6 @@ public class OAuthCallbackFilter extends AuthenticatingFilter implements Session
         regenerateSession(subject);
         issueSuccessRedirect(request, response);
         return false;
-    }
-
-    private URI createRedirectCallback(ServletRequest request) {
-        String scheme = request.getScheme();
-        String host = request.getServerName();
-        int port = request.getServerPort();
-        try {
-            String portPart = (port == 80 || port == 443) ? "" : ":" + port;
-            URI callback = new URI(scheme + "://" + host + portPart + "/callback");
-            oauthConfig.setRedirect(callback);
-            return callback;
-        } catch (URISyntaxException e) {
-            throw new IllegalStateException("Invalid redirect URI", e);
-        }
     }
 
     @Override

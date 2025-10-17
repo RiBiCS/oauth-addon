@@ -7,23 +7,8 @@
  */
 package org.seedstack.oauth.internal;
 
-import com.google.common.base.Strings;
-import com.nimbusds.oauth2.sdk.*;
-import com.nimbusds.oauth2.sdk.auth.ClientSecretBasic;
-import com.nimbusds.oauth2.sdk.auth.Secret;
-import com.nimbusds.oauth2.sdk.http.HTTPResponse;
-import com.nimbusds.oauth2.sdk.id.ClientID;
-import com.nimbusds.oauth2.sdk.token.Tokens;
-import com.nimbusds.openid.connect.sdk.Nonce;
-import com.nimbusds.openid.connect.sdk.OIDCTokenResponse;
-import com.nimbusds.openid.connect.sdk.token.OIDCTokens;
-import org.apache.shiro.authc.AuthenticationException;
-import org.seedstack.oauth.OAuthConfig;
-import org.seedstack.oauth.OAuthProvider;
-import org.seedstack.seed.SeedException;
-import org.seedstack.shed.exception.BaseException;
+import static com.google.common.base.Preconditions.checkNotNull;
 
-import javax.servlet.ServletRequest;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.net.URI;
@@ -34,7 +19,31 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import static com.google.common.base.Preconditions.checkNotNull;
+import javax.servlet.ServletRequest;
+
+import org.apache.shiro.authc.AuthenticationException;
+import org.seedstack.oauth.OAuthConfig;
+import org.seedstack.oauth.OAuthProvider;
+import org.seedstack.seed.SeedException;
+import org.seedstack.shed.exception.BaseException;
+
+import com.google.common.base.Strings;
+import com.nimbusds.oauth2.sdk.AccessTokenResponse;
+import com.nimbusds.oauth2.sdk.AuthorizationGrant;
+import com.nimbusds.oauth2.sdk.ErrorObject;
+import com.nimbusds.oauth2.sdk.ErrorResponse;
+import com.nimbusds.oauth2.sdk.ParseException;
+import com.nimbusds.oauth2.sdk.Scope;
+import com.nimbusds.oauth2.sdk.TokenRequest;
+import com.nimbusds.oauth2.sdk.TokenResponse;
+import com.nimbusds.oauth2.sdk.auth.ClientSecretBasic;
+import com.nimbusds.oauth2.sdk.auth.Secret;
+import com.nimbusds.oauth2.sdk.http.HTTPResponse;
+import com.nimbusds.oauth2.sdk.id.ClientID;
+import com.nimbusds.oauth2.sdk.token.Tokens;
+import com.nimbusds.openid.connect.sdk.Nonce;
+import com.nimbusds.openid.connect.sdk.OIDCTokenResponse;
+import com.nimbusds.openid.connect.sdk.token.OIDCTokens;
 
 final class OAuthUtils {
     public static final String OPENID_SCOPE = "openid";
@@ -85,7 +94,7 @@ final class OAuthUtils {
     }
 
     static OAuthAuthenticationTokenImpl requestTokens(OAuthProvider oauthProvider, OAuthConfig oauthConfig,
-                                                      AuthorizationGrant authorizationGrant, Nonce nonce, Scope scope) {
+            AuthorizationGrant authorizationGrant, Nonce nonce, Scope scope) {
         URI endpointURI = oauthProvider.getTokenEndpoint();
         Map<String, List<String>> parameters = OAuthUtils.extractQueryParameters(endpointURI);
         endpointURI = OAuthUtils.stripQueryString(endpointURI);
@@ -160,5 +169,19 @@ final class OAuthUtils {
             }
         }
         return msg;
+    }
+
+    static URI createRedirectCallback(ServletRequest request) {
+        String scheme = request.getScheme();
+        String host = request.getServerName();
+        int port = request.getServerPort();
+        try {
+            String portPart = (port == 80 || port == 443) ? "" : ":" + port;
+            URI callback = new URI(scheme + "://" + host + portPart + "/callback");
+            // oauthConfig.setRedirect(callback);
+            return callback;
+        } catch (URISyntaxException e) {
+            throw new IllegalStateException("Invalid redirect URI", e);
+        }
     }
 }
